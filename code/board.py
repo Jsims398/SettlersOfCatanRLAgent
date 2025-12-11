@@ -83,7 +83,7 @@ class catanBoard(hexTile, Vertex):
         for hex_i in self.boardGraph[v_coord].adjacentHexList:
             r = self.hexTileDict[hex_i].resource
             if r.num is not None:   # exclude desert
-                exp[r.type] += prob[r.num] * default_reward[r.type]
+                exp[r.type] += ((prob[r.num] * 36) * default_reward[r.type])
         return exp
     
     def evaluate_settlement_reward(self, v_coord, player=None):
@@ -91,7 +91,7 @@ class catanBoard(hexTile, Vertex):
         total = sum(exp.values())
         diversity = sum(1 for v in exp.values() if v > 0)
 
-        base_reward = total*2 + diversity*3
+        base_reward = total*4 + diversity*3
 
         proximity_bonus = 0
         if player is not None:
@@ -115,7 +115,7 @@ class catanBoard(hexTile, Vertex):
                                         q.append((nb, d+1))
 
                         if found_dist == 1:
-                            proximity_bonus += 10
+                            proximity_bonus += 5
                         elif found_dist == 2:
                             proximity_bonus += 3
             except Exception:
@@ -487,14 +487,11 @@ class catanBoard(hexTile, Vertex):
         for neighbor in self.boardGraph[settlement_spot].edgeList:
             neighbor_player = self.boardGraph[neighbor].state['Player']
             if neighbor_player == player:
-                proximity_score += 30
+                proximity_score += 50
             elif neighbor_player is not None:
-                proximity_score -= 15
+                proximity_score -= 20
 
-        # Bonus / penalty for road direction relative to important points
         bonus = 0
-
-        # 1) Reward roads that point toward the player's last settlement (encourages connecting)
         last_settlement = None
         try:
             last_settlement = player.buildGraph['SETTLEMENTS'][-1]
@@ -506,10 +503,8 @@ class catanBoard(hexTile, Vertex):
             dx_tot = last_settlement.x - settlement_spot.x
             dy_tot = last_settlement.y - settlement_spot.y
 
-            # if the vector is essentially zero, skip directional last-settlement bonus
             if not (dx_tot == 0 and dy_tot == 0):
                 for idx, neighbor in enumerate(self.boardGraph[settlement_spot].edgeList):
-                    # check if there's a road on this edge owned by the player
                     try:
                         owner = self.boardGraph[settlement_spot].edgeState[idx][0]
                         has_road = self.boardGraph[settlement_spot].edgeState[idx][1]
@@ -521,46 +516,39 @@ class catanBoard(hexTile, Vertex):
                         # vector to neighbor
                         dx_n = neighbor.x - settlement_spot.x
                         dy_n = neighbor.y - settlement_spot.y
-                        # dot product to check if neighbor lies roughly in direction of last settlement
                         dot = dx_n * dx_tot + dy_n * dy_tot
                         if dot > 0:
-                            # road points toward last settlement -> positive bonus
                             bonus += 20
                         else:
                             # road points away -> small negative bonus
                             bonus -= 5
+        robber_center = None
+        try:
+            for hex_tile in self.hexTileDict.values():
+                if getattr(hex_tile, 'robber', False):
+                    robber_center = getattr(hex_tile, 'pixelCenter', None)
+                    break
+        except Exception:
+            robber_center = None
 
-        # 2) Penalty if any road from this spot points toward the robber
-        # Find robber hex center (if any)
-        # robber_center = None
-        # try:
-        #     for hex_tile in self.hexTileDict.values():
-        #         if getattr(hex_tile, 'robber', False):
-        #             # some hexTile implementations store pixel center as `pixelCenter`
-        #             robber_center = getattr(hex_tile, 'pixelCenter', None)
-        #             break
-        # except Exception:
-        #     robber_center = None
+        if robber_center is not None:
+            dx_rob = robber_center.x - settlement_spot.x
+            dy_rob = robber_center.y - settlement_spot.y
+            if not (dx_rob == 0 and dy_rob == 0):
+                for idx, neighbor in enumerate(self.boardGraph[settlement_spot].edgeList):
+                    try:
+                        owner = self.boardGraph[settlement_spot].edgeState[idx][0]
+                        has_road = self.boardGraph[settlement_spot].edgeState[idx][1]
+                    except Exception:
+                        owner = None
+                        has_road = False
 
-        # if robber_center is not None:
-        #     dx_rob = robber_center.x - settlement_spot.x
-        #     dy_rob = robber_center.y - settlement_spot.y
-        #     # skip degenerate vector
-        #     if not (dx_rob == 0 and dy_rob == 0):
-        #         for idx, neighbor in enumerate(self.boardGraph[settlement_spot].edgeList):
-        #             try:
-        #                 owner = self.boardGraph[settlement_spot].edgeState[idx][0]
-        #                 has_road = self.boardGraph[settlement_spot].edgeState[idx][1]
-        #             except Exception:
-        #                 owner = None
-        #                 has_road = False
-
-        #             if has_road and owner == player:
-        #                 dx_n = neighbor.x - settlement_spot.x
-        #                 dy_n = neighbor.y - settlement_spot.y
-        #                 dot_rob = dx_n * dx_rob + dy_n * dy_rob
-        #                 if dot_rob > 0:
-        #                     bonus -= 30
+                    if has_road and owner == player:
+                        dx_n = neighbor.x - settlement_spot.x
+                        dy_n = neighbor.y - settlement_spot.y
+                        dot_rob = dx_n * dx_rob + dy_n * dy_rob
+                        if dot_rob > 0:
+                            bonus -= 20
 
         proximity_score += bonus
         return proximity_score
